@@ -15,7 +15,9 @@ type PlayerId = 'hansu' | 'clawd';
 type AuthedSocket = Socket & { data: { playerId?: PlayerId; gameId?: string } };
 
 @WebSocketGateway({
-  path: '/api/socket.io',
+  // Behind nginx `/api/*` proxy which strips `/api` prefix.
+  // So the upstream (Nest) must listen on `/socket.io`.
+  path: '/socket.io',
   cors: { origin: true, credentials: true },
 })
 export class GamesGateway {
