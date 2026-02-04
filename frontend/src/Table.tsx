@@ -1,10 +1,11 @@
 import { useEffect, useState, useRef } from 'react';
 import { api } from './api';
 import type { GameStatePublic, PlayerId } from './api';
+import type { WsClient } from './ws';
 import { Card } from './Card';
 import { generateSeed, sha256 } from './poker';
-import { openGameSse } from './sse';
 import { FairnessPanel } from './FairnessPanel';
+import { connectWs } from './ws';
 
 interface TableProps {
     gameId: string;
@@ -17,17 +18,34 @@ export const Table: React.FC<TableProps> = ({ gameId, playerId, token, onLeave }
     const [state, setState] = useState<GameStatePublic | null>(null);
     const [fairnessError, setFairnessError] = useState<string>('');
 
+    const socketRef = useRef<WsClient | null>(null);
+
     // Fairness state
     const currentHandIdRef = useRef<string | null>(null);
     const mySeedRef = useRef<string | null>(null);
 
     useEffect(() => {
-        fetchState();
-        const close = openGameSse(gameId, token, () => {
-            // On any event, refresh state. (event log first, /state on demand)
-            fetchState();
+        // WebSocket-driven realtime updates
+        const socket = connectWs(token);
+        socketRef.current = socket;
+
+        socket.on('connect', () => {
+            socket.emit('join', { gameId });
         });
-        return () => close();
+
+        socket.on('state', (s: GameStatePublic) => {
+            setState(s);
+            void checkFairness(s);
+        });
+
+        socket.on('connect_error', (err) => {
+            console.error('WS connect_error', err);
+        });
+
+        return () => {
+            socketRef.current = null;
+            socket.disconnect();
+        };
     }, [gameId, token]);
 
     const fetchState = async () => {
@@ -71,8 +89,16 @@ export const Table: React.FC<TableProps> = ({ gameId, playerId, token, onLeave }
         }
         try {
             const hash = await sha256(seed);
-            await api.commit(gameId, state.hand.handId, hash, token);
-            await fetchState();
+            const sock = socketRef.current;
+            if (!sock) {
+                // fallback
+                await api.commit(gameId, state.hand.handId, hash, token);
+                await fetchState();
+                return;
+            }
+            sock.emit('commit', { gameId, handId: state.hand.handId, commitHash: hash }, (res: any) => {
+                if (!res?.ok) setFairnessError(res?.error ?? 'Commit failed');
+            });
         } catch (e: any) {
             setFairnessError(e?.message ?? String(e));
         }
@@ -86,8 +112,16 @@ export const Table: React.FC<TableProps> = ({ gameId, playerId, token, onLeave }
             return;
         }
         try {
-            await api.reveal(gameId, state.hand.handId, seed, token);
-            await fetchState();
+            const sock = socketRef.current;
+            if (!sock) {
+                // fallback
+                await api.reveal(gameId, state.hand.handId, seed, token);
+                await fetchState();
+                return;
+            }
+            sock.emit('reveal', { gameId, handId: state.hand.handId, seed }, (res: any) => {
+                if (!res?.ok) setFairnessError(res?.error ?? 'Reveal failed');
+            });
         } catch (e: any) {
             setFairnessError(e?.message ?? String(e));
         }
@@ -96,8 +130,15 @@ export const Table: React.FC<TableProps> = ({ gameId, playerId, token, onLeave }
     const handleAction = async (act: string, amount?: number) => {
         // setLoading(true);
         try {
-            await api.action(gameId, act, amount, token);
-            fetchState();
+            const sock = socketRef.current;
+            if (sock) {
+                sock.emit('action', { gameId, action: act, amount }, (res: any) => {
+                    if (!res?.ok) alert(res?.error ?? 'Action failed');
+                });
+            } else {
+                await api.action(gameId, act, amount, token);
+                fetchState();
+            }
         } catch (e: any) {
             alert(e.message);
         } finally {
