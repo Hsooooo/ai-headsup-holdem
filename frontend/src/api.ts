@@ -60,8 +60,13 @@ export interface CreateGameResponse {
 const API_BASE = ''; // Proxy handles base
 
 export const api = {
-    async createGame(): Promise<GameStatePublic> {
-        const res = await fetch(`${API_BASE}/games`, { method: 'POST' });
+    async createGame(token: string): Promise<GameStatePublic> {
+        const res = await fetch(`${API_BASE}/games`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
         if (!res.ok) throw new Error('Create Failed');
         return res.json();
     },

@@ -14,7 +14,7 @@ export const Lobby: React.FC<LobbyProps> = ({ onJoin }) => {
 
     const handleCreate = async () => {
         try {
-            const g = await api.createGame();
+            const g = await api.createGame(TOKEN_HANSU);
             setGameId(g.gameId);
         } catch (e: any) {
             setError(e.message);
