@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Lobby } from './Lobby';
 import { Table } from './Table';
-import { PlayerId } from './api';
+import type { PlayerId } from './api';
 
 function App() {
   const [gameId, setGameId] = useState<string | null>(null);

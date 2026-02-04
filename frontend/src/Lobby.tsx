@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { api, PlayerId } from './api';
+import { useState } from 'react';
+import { api } from './api';
+import type { PlayerId } from './api';
 
 interface LobbyProps {
     onJoin: (gameId: string, playerId: PlayerId, token: string) => void;

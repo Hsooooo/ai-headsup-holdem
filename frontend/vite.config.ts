@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
+    // Dev-only proxy. Production uses nginx: /api -> api:3000
     proxy: {
       '/games': {
         target: 'http://localhost:3000',

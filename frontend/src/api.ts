@@ -57,7 +57,7 @@ export interface CreateGameResponse {
     // ... other fields
 }
 
-const API_BASE = ''; // Proxy handles base
+const API_BASE = '/api'; // nginx proxy → backend
 
 export const api = {
     async createGame(token: string): Promise<GameStatePublic> {

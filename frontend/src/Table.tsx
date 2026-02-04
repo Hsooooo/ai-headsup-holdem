@@ -1,5 +1,6 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { api, GameStatePublic, PlayerId } from './api';
+import { useEffect, useState, useRef } from 'react';
+import { api } from './api';
+import type { GameStatePublic, PlayerId } from './api';
 import { Card } from './Card';
 import { generateSeed, sha256 } from './poker';
 
@@ -12,7 +13,7 @@ interface TableProps {
 
 export const Table: React.FC<TableProps> = ({ gameId, playerId, token, onLeave }) => {
     const [state, setState] = useState<GameStatePublic | null>(null);
-    const [loading, setLoading] = useState(false);
+    // const [loading, setLoading] = useState(false);
 
     // Fairness state
     const currentHandIdRef = useRef<string | null>(null);
@@ -70,14 +71,14 @@ export const Table: React.FC<TableProps> = ({ gameId, playerId, token, onLeave }
     };
 
     const handleAction = async (act: string, amount?: number) => {
-        setLoading(true);
+        // setLoading(true);
         try {
             await api.action(gameId, act, amount, token);
             fetchState();
         } catch (e: any) {
             alert(e.message);
         } finally {
-            setLoading(false);
+            // setLoading(false);
         }
     };
 
