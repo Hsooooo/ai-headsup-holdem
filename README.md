@@ -23,7 +23,33 @@
 
 ## Description
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+Provably fair heads-up Texas hold'em.
+
+- Backend: NestJS API
+- Frontend: Vite + React (served via nginx)
+- Stores: Postgres + Redis
+
+## Quick start (Docker)
+
+1) Create `.env` at repo root (do NOT commit):
+```bash
+TOKEN_HANSU=...  # your token
+TOKEN_CLAWD=...  # clawd token
+```
+
+2) Start:
+```bash
+docker compose up --build -d
+```
+
+- Frontend: `http://localhost/`
+- API (through frontend proxy): `http://localhost/api/...`
+- Swagger: `http://localhost/api/docs`
+
+> Tokens are not embedded in frontend. Input them in the UI and they are stored in localStorage.
+
+---
+
 
 ## Project setup
 
