@@ -36,5 +36,18 @@ services:
   redis:
     image: redis:7
 
+  clawd-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+    environment:
+      - NODE_ENV=production
+      - API_URL=http://api:3000
+      - REDIS_URL=redis://redis:6379
+      - TOKEN_CLAWD=${TOKEN_CLAWD}
+    depends_on:
+      - api
+      - redis
+
 volumes:
   pgdata:

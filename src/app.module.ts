@@ -8,6 +8,7 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { AuthController } from './auth/auth.controller';
 import { GamesModule } from './games/games.module';
+import { BotModule } from './bot/bot.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { GamesModule } from './games/games.module';
     }),
     AuthModule,
     GamesModule,
+    BotModule,
   ],
   controllers: [AppController, AuthController],
   providers: [AppService],
