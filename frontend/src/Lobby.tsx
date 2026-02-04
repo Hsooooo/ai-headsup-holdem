@@ -9,12 +9,18 @@ export const Lobby: React.FC<LobbyProps> = ({ onJoin }) => {
     const [gameId, setGameId] = useState('');
     const [error, setError] = useState('');
 
-    const TOKEN_HANSU = 'change-me'; // Hardcoded for demo/ease
-    const TOKEN_CLAWD = 'change-me';
+    const [tokenHansu, setTokenHansu] = useState(localStorage.getItem('TOKEN_HANSU') ?? '');
+    const [tokenClawd, setTokenClawd] = useState(localStorage.getItem('TOKEN_CLAWD') ?? '');
 
     const handleCreate = async () => {
         try {
-            const g = await api.createGame(TOKEN_HANSU);
+            if (!tokenHansu) {
+                setError('Set TOKEN_HANSU first');
+                return;
+            }
+            localStorage.setItem('TOKEN_HANSU', tokenHansu);
+            localStorage.setItem('TOKEN_CLAWD', tokenClawd);
+            const g = await api.createGame(tokenHansu);
             setGameId(g.gameId);
         } catch (e: any) {
             setError(e.message);
@@ -26,7 +32,13 @@ export const Lobby: React.FC<LobbyProps> = ({ onJoin }) => {
             setError('Create a game first or enter ID');
             return;
         }
-        const token = pid === 'hansu' ? TOKEN_HANSU : TOKEN_CLAWD;
+        const token = pid === 'hansu' ? tokenHansu : tokenClawd;
+        if (!token) {
+            setError(`Set TOKEN_${pid.toUpperCase()} first`);
+            return;
+        }
+        localStorage.setItem('TOKEN_HANSU', tokenHansu);
+        localStorage.setItem('TOKEN_CLAWD', tokenClawd);
         try {
             await api.join(gameId, pid, token);
             onJoin(gameId, pid, token);
@@ -37,9 +49,13 @@ export const Lobby: React.FC<LobbyProps> = ({ onJoin }) => {
 
     // Helper to join opponent for testing
     const joinOpponent = async () => {
-        const token = TOKEN_CLAWD;
+        if (!gameId) return;
+        if (!tokenClawd) {
+            setError('Set TOKEN_CLAWD first');
+            return;
+        }
         try {
-            await api.join(gameId, 'clawd', token);
+            await api.join(gameId, 'clawd', tokenClawd);
             alert('Clawd joined!');
         } catch (e: any) {
             setError(e.message);
@@ -51,6 +67,24 @@ export const Lobby: React.FC<LobbyProps> = ({ onJoin }) => {
             <h1>Texas Hold'em AI</h1>
             <div style={{ marginBottom: '1rem' }}>
                 <button className="primary" onClick={handleCreate}>Create New Game</button>
+            </div>
+
+            <div style={{ marginBottom: '1rem' }}>
+                <label>Hansu Token (TOKEN_HANSU)</label>
+                <input
+                    value={tokenHansu}
+                    onChange={e => setTokenHansu(e.target.value)}
+                    placeholder="paste token"
+                />
+            </div>
+
+            <div style={{ marginBottom: '1rem' }}>
+                <label>Clawd Token (TOKEN_CLAWD)</label>
+                <input
+                    value={tokenClawd}
+                    onChange={e => setTokenClawd(e.target.value)}
+                    placeholder="paste token"
+                />
             </div>
 
             <div style={{ marginBottom: '1rem' }}>

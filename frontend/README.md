@@ -31,4 +31,5 @@ React (Vite) + TypeScript로 개발되었습니다.
 백엔드 서버가 `http://localhost:3000`에서 실행 중이어야 합니다.
 `vite.config.ts`에 API 프록시가 설정되어 있습니다.
 
-인증 토큰은 `api.ts` 또는 `Lobby.tsx` 내에서 설정할 수 있으며, 백엔드의 `.env` 파일과 일치해야 합니다. (기본값: `change-me`)
+인증 토큰은 **코드에 하드코딩하지 않고**, 앱 UI에서 입력해 로컬에 저장(localStorage)하도록 했습니다.
+- `TOKEN_HANSU`, `TOKEN_CLAWD` 값을 입력하세요(백엔드 `.env`와 일치해야 함)
