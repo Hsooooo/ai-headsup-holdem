@@ -3,6 +3,7 @@ import { api } from './api';
 import type { GameStatePublic, PlayerId } from './api';
 import { Card } from './Card';
 import { generateSeed, sha256 } from './poker';
+import { openGameSse } from './sse';
 
 interface TableProps {
     gameId: string;
@@ -20,10 +21,13 @@ export const Table: React.FC<TableProps> = ({ gameId, playerId, token, onLeave }
     const mySeedRef = useRef<string | null>(null);
 
     useEffect(() => {
-        const interval = setInterval(fetchState, 1000);
         fetchState();
-        return () => clearInterval(interval);
-    }, [gameId]);
+        const close = openGameSse(gameId, token, () => {
+            // On any event, refresh state. (event log first, /state on demand)
+            fetchState();
+        });
+        return () => close();
+    }, [gameId, token]);
 
     const fetchState = async () => {
         try {

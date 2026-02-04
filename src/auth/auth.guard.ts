@@ -15,16 +15,20 @@ export class BearerTokenAuthGuard implements CanActivate {
       | string
       | undefined;
 
-    if (!auth || typeof auth !== 'string') {
-      throw new UnauthorizedException('Missing Authorization header');
+    // For browser EventSource (SSE) which can't set headers easily, allow token via query string.
+    // NOTE: This is acceptable for hobby deployment but consider cookie auth or fetch-stream SSE for stricter security.
+    let token: string | undefined;
+    if (auth && typeof auth === 'string') {
+      const m = auth.match(/^Bearer\s+(.+)$/i);
+      if (!m) throw new UnauthorizedException('Invalid Authorization header');
+      token = m[1].trim();
+    } else if (typeof req.query?.token === 'string') {
+      token = req.query.token;
     }
 
-    const m = auth.match(/^Bearer\s+(.+)$/i);
-    if (!m) {
-      throw new UnauthorizedException('Invalid Authorization header');
+    if (!token) {
+      throw new UnauthorizedException('Missing token');
     }
-
-    const token = m[1].trim();
 
     const hansu = process.env.TOKEN_HANSU ?? '';
     const clawd = process.env.TOKEN_CLAWD ?? '';

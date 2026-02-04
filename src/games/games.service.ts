@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Observable } from 'rxjs';
 import {
   Action,
   GameState,
@@ -9,15 +10,18 @@ import {
   setReveal,
   startHand,
 } from '../poker/engine';
+import { GameEventBus, GameEvent } from './events';
 
 @Injectable()
 export class GamesService {
   private games = new Map<string, GameState>();
+  private bus = new GameEventBus();
 
-  createGame(): GameState {
+  createGame(createdBy: PlayerId): GameState {
     const gameId = crypto.randomUUID();
     const game = defaultGame(gameId);
     this.games.set(gameId, game);
+    this.bus.emit(gameId, { type: 'game.updated', payload: { createdBy } });
     return game;
   }
 
@@ -27,11 +31,19 @@ export class GamesService {
     return g;
   }
 
+  events(gameId: string, _playerId: PlayerId): Observable<GameEvent> {
+    // NOTE: no sensitive info is emitted here.
+    return this.bus.forGame(gameId).asObservable();
+  }
+
   join(gameId: string, playerId: PlayerId): GameState {
     const g = this.getGame(gameId);
     g.joined[playerId] = true;
+    this.bus.emit(gameId, { type: 'game.updated', payload: { joined: playerId } });
+
     if (g.joined.hansu && g.joined.clawd && !g.currentHand) {
-      startHand(g);
+      const hand = startHand(g);
+      this.bus.emit(gameId, { type: 'hand.started', handId: hand.handId, payload: { button: hand.button } });
     }
     return g;
   }
@@ -51,7 +63,6 @@ export class GamesService {
           fairness: {
             handId: hand.fairness.handId,
             commit: hand.fairness.commit,
-            // seeds are revealed only after both revealed; until then do not expose
             seed:
               hand.fairness.seed.hansu && hand.fairness.seed.clawd
                 ? hand.fairness.seed
@@ -95,28 +106,55 @@ export class GamesService {
   commit(gameId: string, playerId: PlayerId, commitHash: string) {
     const g = this.getGame(gameId);
     setCommit(g, playerId, commitHash);
+    const handId = g.currentHand?.handId;
+    this.bus.emit(gameId, { type: 'fairness.commit', handId, payload: { playerId } });
     return this.getStateFor(gameId, playerId);
   }
 
   reveal(gameId: string, playerId: PlayerId, seed: string) {
     const g = this.getGame(gameId);
+    const beforeDealt = !g.currentHand?.deck;
     setReveal(g, playerId, seed);
+    const handId = g.currentHand?.handId;
+    this.bus.emit(gameId, { type: 'fairness.reveal', handId, payload: { playerId } });
+
+    const afterDealt = !!g.currentHand?.deck;
+    if (beforeDealt && afterDealt) {
+      this.bus.emit(gameId, { type: 'game.updated', handId, payload: { dealt: true } });
+    }
+
     return this.getStateFor(gameId, playerId);
   }
 
   action(gameId: string, playerId: PlayerId, action: Action) {
     const g = this.getGame(gameId);
-    act(g, playerId, action);
+    const handId = g.currentHand?.handId;
 
-    // if hand ended, auto-start next hand when both have chips
+    act(g, playerId, action);
+    this.bus.emit(gameId, { type: 'betting.action', handId, payload: { playerId, action } });
+
+    // Emit street dealt updates when board length changes
+    const boardLen = g.currentHand?.board.length ?? 0;
+    if (boardLen === 3) this.bus.emit(gameId, { type: 'street.dealt', handId, payload: { street: 'flop' } });
+    if (boardLen === 4) this.bus.emit(gameId, { type: 'street.dealt', handId, payload: { street: 'turn' } });
+    if (boardLen === 5) this.bus.emit(gameId, { type: 'street.dealt', handId, payload: { street: 'river' } });
+
     const hand = g.currentHand;
     if (hand?.ended) {
+      this.bus.emit(gameId, {
+        type: 'hand.ended',
+        handId: hand.handId,
+        payload: { winner: hand.winner, payout: hand.payout },
+      });
+
       const bothHaveChips = g.stacks.hansu > 0 && g.stacks.clawd > 0;
       if (bothHaveChips) {
         g.currentHand = undefined;
-        startHand(g);
+        const next = startHand(g);
+        this.bus.emit(gameId, { type: 'hand.started', handId: next.handId, payload: { button: next.button } });
       } else {
         g.status = 'finished';
+        this.bus.emit(gameId, { type: 'game.updated', payload: { status: 'finished' } });
       }
     }
 
