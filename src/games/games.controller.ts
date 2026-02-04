@@ -1,5 +1,7 @@
-import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Req, Sse } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { map, Observable, startWith } from 'rxjs';
+import { MessageEvent } from '@nestjs/common';
 import { GamesService } from './games.service';
 import { ActionDto, CommitDto, JoinDto, RevealDto } from './dto';
 import { Action } from '../poker/engine';
@@ -11,8 +13,8 @@ export class GamesController {
   constructor(private readonly games: GamesService) {}
 
   @Post()
-  create() {
-    return this.games.createGame();
+  create(@Req() req: any) {
+    return this.games.createGame(req.user.playerId);
   }
 
   @Get(':gameId')
@@ -28,6 +30,19 @@ export class GamesController {
   @Get(':gameId/state')
   state(@Param('gameId') gameId: string, @Req() req: any) {
     return this.games.getStateFor(gameId, req.user.playerId);
+  }
+
+  @Sse(':gameId/events')
+  events(@Param('gameId') gameId: string, @Req() req: any): Observable<MessageEvent> {
+    const playerId = req.user.playerId;
+    // Send lightweight event logs. Client can call /state when needed.
+    return this.games.events(gameId, playerId).pipe(
+      startWith({ type: 'game.updated', gameId, payload: { note: 'connected' } }),
+      map((ev) => ({
+        type: ev.type,
+        data: ev,
+      })),
+    );
   }
 
   @Post(':gameId/hands/:handId/commit')
