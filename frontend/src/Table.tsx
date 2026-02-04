@@ -4,6 +4,7 @@ import type { GameStatePublic, PlayerId } from './api';
 import { Card } from './Card';
 import { generateSeed, sha256 } from './poker';
 import { openGameSse } from './sse';
+import { FairnessPanel } from './FairnessPanel';
 
 interface TableProps {
     gameId: string;
@@ -14,7 +15,7 @@ interface TableProps {
 
 export const Table: React.FC<TableProps> = ({ gameId, playerId, token, onLeave }) => {
     const [state, setState] = useState<GameStatePublic | null>(null);
-    // const [loading, setLoading] = useState(false);
+    const [fairnessError, setFairnessError] = useState<string>('');
 
     // Fairness state
     const currentHandIdRef = useRef<string | null>(null);
@@ -33,7 +34,7 @@ export const Table: React.FC<TableProps> = ({ gameId, playerId, token, onLeave }
         try {
             const s = await api.getState(gameId, token);
             setState(s);
-            checkFairness(s);
+            await checkFairness(s);
         } catch (e) {
             console.error(e);
         }
@@ -47,30 +48,48 @@ export const Table: React.FC<TableProps> = ({ gameId, playerId, token, onLeave }
         if (currentHandIdRef.current !== handId) {
             currentHandIdRef.current = handId;
             mySeedRef.current = generateSeed();
-            // We need to commit getting a new seed immediately? 
-            // Actually better to check if we committed already (in case of refresh)
-            // But if reload page, we lose seed... localstorage might be better but for now memory is fine.
-            // If we reload, we might be stuck unable to reveal. 
-            // For MVP: if we see a commit for us but don't have seed, we are kind of bricked for that hand. 
-            // But usually we just fold or game continues.
-            // Actually if we haven't committed in backend, we are good.
+            setFairnessError('');
         }
 
-        const myCommit = s.hand.fairness.commit[playerId];
-        const oppCommit = s.hand.fairness.commit[playerId === 'hansu' ? 'clawd' : 'hansu'];
-        const myReveal = s.hand.fairness.seed[playerId];
+        // AUTO MODE DISABLED: we keep fairness manual/visible via panel.
+        // (Auto commit/reveal can be re-enabled later with better UX.)
+    };
 
-        // 1. Commit if needed
-        if (!myCommit && mySeedRef.current) {
-            // console.log('Committing...');
-            const hash = await sha256(mySeedRef.current);
-            await api.commit(gameId, handId, hash, token);
+    const handleNewSeed = () => {
+        mySeedRef.current = generateSeed();
+        setFairnessError('');
+        // force rerender
+        setState((s) => (s ? { ...s } : s));
+    };
+
+    const handleCommit = async () => {
+        if (!state?.hand) return;
+        const seed = mySeedRef.current;
+        if (!seed) {
+            setFairnessError('No seed. Click New Seed first.');
+            return;
         }
+        try {
+            const hash = await sha256(seed);
+            await api.commit(gameId, state.hand.handId, hash, token);
+            await fetchState();
+        } catch (e: any) {
+            setFairnessError(e?.message ?? String(e));
+        }
+    };
 
-        // 2. Reveal if opponent committed (and we haven't revealed)
-        if (myCommit && oppCommit && !myReveal && mySeedRef.current) {
-            // console.log('Revealing...');
-            await api.reveal(gameId, handId, mySeedRef.current, token);
+    const handleReveal = async () => {
+        if (!state?.hand) return;
+        const seed = mySeedRef.current;
+        if (!seed) {
+            setFairnessError('No seed. Click New Seed first.');
+            return;
+        }
+        try {
+            await api.reveal(gameId, state.hand.handId, seed, token);
+            await fetchState();
+        } catch (e: any) {
+            setFairnessError(e?.message ?? String(e));
         }
     };
 
@@ -97,6 +116,16 @@ export const Table: React.FC<TableProps> = ({ gameId, playerId, token, onLeave }
             <div style={{ position: 'absolute', top: 10, right: 10, color: 'white' }}>
                 Game ID: {gameId.slice(0, 8)}... <button onClick={onLeave}>Quit</button>
             </div>
+
+            <FairnessPanel
+                state={state}
+                playerId={playerId}
+                mySeed={mySeedRef.current}
+                onGenerateSeed={handleNewSeed}
+                onCommit={handleCommit}
+                onReveal={handleReveal}
+                error={fairnessError}
+            />
 
             {/* Opponent Area */}
             <div style={{ alignSelf: 'center', textAlign: 'center' }}>

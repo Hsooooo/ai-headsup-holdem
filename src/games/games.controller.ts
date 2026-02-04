@@ -62,6 +62,10 @@ export class GamesController {
     @Body() body: RevealDto,
     @Req() req: any,
   ) {
+    // Defensive: avoid crashing on missing body
+    if (!body || typeof (body as any).seed !== 'string' || !(body as any).seed) {
+      throw new Error('BAD_REVEAL_BODY');
+    }
     return this.games.reveal(gameId, req.user.playerId, body.seed);
   }
 
