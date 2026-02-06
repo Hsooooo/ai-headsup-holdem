@@ -246,28 +246,37 @@ export class GamesService implements OnModuleInit {
     if (!g?.currentHand || g.currentHand.deck) return; // already dealt
 
     const hand = g.currentHand;
-    const aiPlayer: PlayerId = 'clawd';
 
-    // Auto-generate seed for AI
-    const seed = randomBytes(32).toString('hex');
-    const commitHash = sha256Hex(seed);
+    // Dev-mode convenience: auto-commit + auto-reveal for BOTH players so a hand
+    // is dealt immediately (no extra fairness round-trips needed in the UI).
+    // This makes /state include each player's own hole cards during the hand.
+    const players: PlayerId[] = ['clawd', 'hansu'];
 
-    // Commit
-    setCommit(g, aiPlayer, commitHash);
-    this.emitEvent(gameId, {
-      type: 'fairness.commit',
-      handId: hand.handId,
-      payload: { playerId: aiPlayer, auto: true },
-    });
-
-    // Reveal immediately
     const beforeDealt = !g.currentHand.deck;
-    setReveal(g, aiPlayer, seed);
-    this.emitEvent(gameId, {
-      type: 'fairness.reveal',
-      handId: hand.handId,
-      payload: { playerId: aiPlayer, auto: true },
-    });
+
+    for (const playerId of players) {
+      if (hand.fairness.seed[playerId]) continue; // already revealed
+
+      const seed = randomBytes(32).toString('hex');
+      const commitHash = sha256Hex(seed);
+
+      setCommit(g, playerId, commitHash);
+      this.emitEvent(gameId, {
+        type: 'fairness.commit',
+        handId: hand.handId,
+        payload: { playerId, auto: true },
+      });
+
+      setReveal(g, playerId, seed);
+      this.emitEvent(gameId, {
+        type: 'fairness.reveal',
+        handId: hand.handId,
+        payload: { playerId, auto: true },
+      });
+
+      // If both seeds are now revealed, setReveal() will deal + init betting.
+      if (g.currentHand.deck) break;
+    }
 
     const afterDealt = !!g.currentHand.deck;
     if (beforeDealt && afterDealt) {
