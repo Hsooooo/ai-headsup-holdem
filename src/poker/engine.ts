@@ -22,6 +22,8 @@ export interface BettingState {
   contributions: Record<PlayerId, number>; // total contributed this hand
   pot: number; // total in pot (sum contributions)
   allIn: Record<PlayerId, boolean>;
+  /** Whether each player has taken an action in the current street since the last bet/raise or street reset. */
+  acted: Record<PlayerId, boolean>;
   lastActionAtMs: number;
 }
 
@@ -142,6 +144,7 @@ function initBetting(game: GameState, hand: HandState) {
     contributions: { hansu: 0, clawd: 0 },
     pot: 0,
     allIn: { hansu: false, clawd: false },
+    acted: { hansu: false, clawd: false },
     lastActionAtMs: Date.now(),
   };
 
@@ -202,6 +205,7 @@ export function act(game: GameState, player: PlayerId, action: Action) {
 
   const updateTurn = () => {
     betting.lastActionAtMs = Date.now();
+    betting.acted[player] = true;
     betting.toAct = other;
   };
 
@@ -230,6 +234,8 @@ export function act(game: GameState, player: PlayerId, action: Action) {
       takeFromStack(amt);
       betting.currentBet = betting.bets[player];
       betting.minRaise = Math.max(betting.minRaise, amt);
+      // After a bet, opponent must respond in this street.
+      betting.acted[other] = false;
       updateTurn();
       break;
     }
@@ -247,6 +253,8 @@ export function act(game: GameState, player: PlayerId, action: Action) {
       takeFromStack(add);
       betting.minRaise = raiseTo - betting.currentBet;
       betting.currentBet = raiseTo;
+      // After a raise, opponent must respond in this street.
+      betting.acted[other] = false;
       updateTurn();
       break;
     }
@@ -266,10 +274,11 @@ export function act(game: GameState, player: PlayerId, action: Action) {
 }
 
 function canAdvance(b: BettingState): boolean {
-  // advance when bets equal and both have acted since last raise.
-  // For HU: if bets are equal, and it's the player who acted first's turn again -> indicates a full round completed.
+  // Advance when:
+  // - Bets are equal (no pending call), AND
+  // - Both players have acted in this street since the last bet/raise or street reset.
   if (b.bets.hansu !== b.bets.clawd) return false;
-  return true;
+  return !!(b.acted.hansu && b.acted.clawd);
 }
 
 function advanceStreet(game: GameState, hand: HandState) {
@@ -278,6 +287,7 @@ function advanceStreet(game: GameState, hand: HandState) {
   b.bets = { hansu: 0, clawd: 0 };
   b.currentBet = 0;
   b.minRaise = game.blinds.bb;
+  b.acted = { hansu: false, clawd: false };
 
   const button = hand.button;
   const bbPlayer: PlayerId = button === 'hansu' ? 'clawd' : 'hansu';
