@@ -27,6 +27,7 @@ export function FairnessPanel({
   const oppCommit = hand?.fairness.commit[oppId];
   const myReveal = hand?.fairness.seed[playerId];
   const oppReveal = hand?.fairness.seed[oppId];
+  const oppAutoLabel = oppId === 'clawd' ? ' (자동)' : '';
 
   const canCommit = !!hand && !!mySeed && !myCommit;
   const canReveal = !!hand && !!mySeed && !!myCommit && !!oppCommit && !myReveal;
@@ -57,9 +58,9 @@ export function FairnessPanel({
 
       <div style={{ marginBottom: 6 }}>
         <div>My commit: {myCommit ? '✅' : '❌'}</div>
-        <div>Opp commit: {oppCommit ? '✅' : '❌'}</div>
+        <div>Opp commit{oppAutoLabel}: {oppCommit ? '✅' : '❌'}</div>
         <div>My reveal: {myReveal ? '✅' : '❌'}</div>
-        <div>Opp reveal: {oppReveal ? '✅' : '❌'}</div>
+        <div>Opp reveal{oppAutoLabel}: {oppReveal ? '✅' : '❌'}</div>
       </div>
 
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>

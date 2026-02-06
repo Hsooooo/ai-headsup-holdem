@@ -11,7 +11,6 @@ export const Lobby: React.FC<LobbyProps> = ({ onJoin }) => {
     const [error, setError] = useState('');
 
     const [tokenHansu, setTokenHansu] = useState(localStorage.getItem('TOKEN_HANSU') ?? '');
-    const [tokenClawd, setTokenClawd] = useState(localStorage.getItem('TOKEN_CLAWD') ?? '');
 
     const handleCreate = async () => {
         try {
@@ -20,7 +19,6 @@ export const Lobby: React.FC<LobbyProps> = ({ onJoin }) => {
                 return;
             }
             localStorage.setItem('TOKEN_HANSU', tokenHansu);
-            localStorage.setItem('TOKEN_CLAWD', tokenClawd);
             const g = await api.createGame(tokenHansu);
             setGameId(g.gameId);
         } catch (e: any) {
@@ -28,40 +26,23 @@ export const Lobby: React.FC<LobbyProps> = ({ onJoin }) => {
         }
     };
 
-    const handleJoin = async (pid: PlayerId) => {
+    const handleJoin = async () => {
         if (!gameId) {
             setError('Create a game first or enter ID');
             return;
         }
-        const token = pid === 'hansu' ? tokenHansu : tokenClawd;
-        if (!token) {
-            setError(`Set TOKEN_${pid.toUpperCase()} first`);
+        if (!tokenHansu) {
+            setError('Set TOKEN_HANSU first');
             return;
         }
         localStorage.setItem('TOKEN_HANSU', tokenHansu);
-        localStorage.setItem('TOKEN_CLAWD', tokenClawd);
         try {
-            await api.join(gameId, pid, token);
-            onJoin(gameId, pid, token);
+            await api.join(gameId, tokenHansu);
+            onJoin(gameId, 'hansu', tokenHansu);
         } catch (e: any) {
             setError(e.message);
         }
     };
-
-    // Helper to join opponent for testing
-    const joinOpponent = async () => {
-        if (!gameId) return;
-        if (!tokenClawd) {
-            setError('Set TOKEN_CLAWD first');
-            return;
-        }
-        try {
-            await api.join(gameId, 'clawd', tokenClawd);
-            alert('Clawd joined!');
-        } catch (e: any) {
-            setError(e.message);
-        }
-    }
 
     return (
         <div className="panel" style={{ maxWidth: '400px', margin: '2rem auto' }}>
@@ -80,15 +61,6 @@ export const Lobby: React.FC<LobbyProps> = ({ onJoin }) => {
             </div>
 
             <div style={{ marginBottom: '1rem' }}>
-                <label>Clawd Token (TOKEN_CLAWD)</label>
-                <input
-                    value={tokenClawd}
-                    onChange={e => setTokenClawd(e.target.value)}
-                    placeholder="paste token"
-                />
-            </div>
-
-            <div style={{ marginBottom: '1rem' }}>
                 <label>Game ID</label>
                 <input
                     value={gameId}
@@ -98,8 +70,7 @@ export const Lobby: React.FC<LobbyProps> = ({ onJoin }) => {
             </div>
 
             <div style={{ display: 'grid', gap: '0.5rem' }}>
-                <button onClick={() => handleJoin('hansu')}>Join as Hansu (Human)</button>
-                <button onClick={joinOpponent} disabled={!gameId}>Simulate Clawd Join</button>
+                <button onClick={handleJoin}>Join as Human</button>
             </div>
 
             {error && <p style={{ color: 'red' }}>{error}</p>}

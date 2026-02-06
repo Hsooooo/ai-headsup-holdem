@@ -1,22 +1,34 @@
 import {
   CanActivate,
   ExecutionContext,
+  Inject,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import type { ConfigType } from '@nestjs/config';
+import { timingSafeEqual } from 'crypto';
+import config from '../config.js';
 
 export type PlayerId = 'hansu' | 'clawd';
 
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
 @Injectable()
 export class BearerTokenAuthGuard implements CanActivate {
+  constructor(
+    @Inject(config.KEY)
+    private readonly appConfig: ConfigType<typeof config>,
+  ) {}
+
   canActivate(context: ExecutionContext): boolean {
     const req = context.switchToHttp().getRequest();
     const auth = (req.headers['authorization'] || req.headers['Authorization']) as
       | string
       | undefined;
 
-    // For browser EventSource (SSE) which can't set headers easily, allow token via query string.
-    // NOTE: This is acceptable for hobby deployment but consider cookie auth or fetch-stream SSE for stricter security.
     let token: string | undefined;
     if (auth && typeof auth === 'string') {
       const m = auth.match(/^Bearer\s+(.+)$/i);
@@ -30,12 +42,12 @@ export class BearerTokenAuthGuard implements CanActivate {
       throw new UnauthorizedException('Missing token');
     }
 
-    const hansu = process.env.TOKEN_HANSU ?? '';
-    const clawd = process.env.TOKEN_CLAWD ?? '';
+    const hansu = this.appConfig.tokenHansu;
+    const clawd = this.appConfig.tokenClawd;
 
     let playerId: PlayerId | null = null;
-    if (token && hansu && token === hansu) playerId = 'hansu';
-    if (token && clawd && token === clawd) playerId = 'clawd';
+    if (hansu && safeEqual(token, hansu)) playerId = 'hansu';
+    if (clawd && safeEqual(token, clawd)) playerId = 'clawd';
 
     if (!playerId) {
       throw new UnauthorizedException('Invalid token');

@@ -3,7 +3,7 @@ import { api } from './api';
 import type { GameStatePublic, PlayerId } from './api';
 import { Card } from './Card';
 import { generateSeed, sha256 } from './poker';
-import { openGameSse } from './sse';
+import { connectGameSocket } from './socket';
 import { FairnessPanel } from './FairnessPanel';
 
 interface TableProps {
@@ -23,11 +23,10 @@ export const Table: React.FC<TableProps> = ({ gameId, playerId, token, onLeave }
 
     useEffect(() => {
         fetchState();
-        const close = openGameSse(gameId, token, () => {
-            // On any event, refresh state. (event log first, /state on demand)
+        const disconnect = connectGameSocket(token, gameId, () => {
             fetchState();
         });
-        return () => close();
+        return () => disconnect();
     }, [gameId, token]);
 
     const fetchState = async () => {
@@ -109,7 +108,6 @@ export const Table: React.FC<TableProps> = ({ gameId, playerId, token, onLeave }
 
     const hand = state.hand;
     const opponentId: PlayerId = playerId === 'hansu' ? 'clawd' : 'hansu';
-    const waitingForOpponent = !state.joined[opponentId];
 
     return (
         <div className="table-felt">
@@ -127,12 +125,12 @@ export const Table: React.FC<TableProps> = ({ gameId, playerId, token, onLeave }
                 error={fairnessError}
             />
 
-            {/* Opponent Area */}
-            <div style={{ alignSelf: 'center', textAlign: 'center' }}>
-                <div style={{ fontSize: '1.2em', fontWeight: 'bold' }}>
-                    {waitingForOpponent ? 'Waiting for opponent...' : 'Clawd (AI)'}
-                    {hand?.button === opponentId && <span className="button-marker"> (D)</span>}
-                </div>
+                {/* Opponent Area */}
+                <div style={{ alignSelf: 'center', textAlign: 'center' }}>
+                    <div style={{ fontSize: '1.2em', fontWeight: 'bold' }}>
+                        AI Opponent
+                        {hand?.button === opponentId && <span className="button-marker"> (D)</span>}
+                    </div>
                 <div>Stack: {state.stacks[opponentId]}</div>
                 <div style={{ display: 'flex', justifyContent: 'center', gap: 5, marginTop: 5 }}>
                     {/* Assume 2 cards face down unless showdown/revealed - Backend logic handles visibility */}
@@ -200,7 +198,7 @@ export const Table: React.FC<TableProps> = ({ gameId, playerId, token, onLeave }
                             }}>Raise</button>
                         </>
                     ) : (
-                        <div style={{ color: '#aaa' }}>Waiting for opponent...</div>
+                        <div style={{ color: '#aaa' }}>Waiting for AI action...</div>
                     )
                 )}
             </div>

@@ -1,27 +1,75 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { randomBytes } from 'crypto';
 import { Observable } from 'rxjs';
 import {
   Action,
   GameState,
+  HandState,
   PlayerId,
   defaultGame,
   act,
   setCommit,
   setReveal,
   startHand,
-} from '../poker/engine';
-import { GameEventBus, GameEvent } from './events';
+} from '../poker/engine.js';
+import { sha256Hex } from '../poker/cards.js';
+import { GameEventBus, GameEvent } from './events.js';
+import { GameEntity } from './entities/game.entity.js';
+import { HandEntity } from './entities/hand.entity.js';
+import { GamesGateway } from './games.gateway.js';
+
+interface ActionLogEntry {
+  player: string;
+  action: string;
+  amount?: number;
+  ts: number;
+}
 
 @Injectable()
-export class GamesService {
+export class GamesService implements OnModuleInit {
   private games = new Map<string, GameState>();
   private bus = new GameEventBus();
+
+  /** Per-hand action log, keyed by handId */
+  private actionLogs = new Map<string, ActionLogEntry[]>();
+
+  constructor(
+    @InjectRepository(GameEntity)
+    private readonly gameRepo: Repository<GameEntity>,
+    @InjectRepository(HandEntity)
+    private readonly handRepo: Repository<HandEntity>,
+    private readonly gateway: GamesGateway,
+  ) {}
+
+  async onModuleInit() {
+    // Crash recovery: load active games from DB into memory
+    const activeGames = await this.gameRepo.find({
+      where: [{ status: 'waiting' }, { status: 'in_progress' }],
+    });
+    for (const entity of activeGames) {
+      const game = this.entityToGameState(entity);
+      this.games.set(game.gameId, game);
+    }
+  }
+
+  private emitEvent(gameId: string, ev: Omit<GameEvent, 'gameId' | 'at'>) {
+    this.bus.emit(gameId, ev);
+    this.gateway.emitToGame(gameId, 'game:event', {
+      ...ev,
+      at: Date.now(),
+      gameId,
+    });
+  }
 
   createGame(createdBy: PlayerId): GameState {
     const gameId = crypto.randomUUID();
     const game = defaultGame(gameId);
+    game.joined.clawd = true;
     this.games.set(gameId, game);
-    this.bus.emit(gameId, { type: 'game.updated', payload: { createdBy } });
+    this.emitEvent(gameId, { type: 'game.updated', payload: { createdBy, joined: 'clawd', auto: true } });
+    this.persistGame(game);
     return game;
   }
 
@@ -32,19 +80,21 @@ export class GamesService {
   }
 
   events(gameId: string, _playerId: PlayerId): Observable<GameEvent> {
-    // NOTE: no sensitive info is emitted here.
     return this.bus.forGame(gameId).asObservable();
   }
 
   join(gameId: string, playerId: PlayerId): GameState {
     const g = this.getGame(gameId);
     g.joined[playerId] = true;
-    this.bus.emit(gameId, { type: 'game.updated', payload: { joined: playerId } });
+    this.emitEvent(gameId, { type: 'game.updated', payload: { joined: playerId } });
 
     if (g.joined.hansu && g.joined.clawd && !g.currentHand) {
       const hand = startHand(g);
-      this.bus.emit(gameId, { type: 'hand.started', handId: hand.handId, payload: { button: hand.button } });
+      this.initActionLog(hand.handId);
+      this.emitEvent(gameId, { type: 'hand.started', handId: hand.handId, payload: { button: hand.button } });
+      this.autoFairnessForAI(gameId);
     }
+    this.persistGame(g);
     return g;
   }
 
@@ -107,7 +157,8 @@ export class GamesService {
     const g = this.getGame(gameId);
     setCommit(g, playerId, commitHash);
     const handId = g.currentHand?.handId;
-    this.bus.emit(gameId, { type: 'fairness.commit', handId, payload: { playerId } });
+    this.emitEvent(gameId, { type: 'fairness.commit', handId, payload: { playerId } });
+    this.persistGame(g);
     return this.getStateFor(gameId, playerId);
   }
 
@@ -116,48 +167,192 @@ export class GamesService {
     const beforeDealt = !g.currentHand?.deck;
     setReveal(g, playerId, seed);
     const handId = g.currentHand?.handId;
-    this.bus.emit(gameId, { type: 'fairness.reveal', handId, payload: { playerId } });
+    this.emitEvent(gameId, { type: 'fairness.reveal', handId, payload: { playerId } });
 
     const afterDealt = !!g.currentHand?.deck;
     if (beforeDealt && afterDealt) {
-      this.bus.emit(gameId, { type: 'game.updated', handId, payload: { dealt: true } });
+      this.emitEvent(gameId, { type: 'game.updated', handId, payload: { dealt: true } });
     }
 
+    this.persistGame(g);
     return this.getStateFor(gameId, playerId);
   }
 
   action(gameId: string, playerId: PlayerId, action: Action) {
     const g = this.getGame(gameId);
     const handId = g.currentHand?.handId;
+    const boardLenBefore = g.currentHand?.board.length ?? 0;
 
     act(g, playerId, action);
-    this.bus.emit(gameId, { type: 'betting.action', handId, payload: { playerId, action } });
 
-    // Emit street dealt updates when board length changes
-    const boardLen = g.currentHand?.board.length ?? 0;
-    if (boardLen === 3) this.bus.emit(gameId, { type: 'street.dealt', handId, payload: { street: 'flop' } });
-    if (boardLen === 4) this.bus.emit(gameId, { type: 'street.dealt', handId, payload: { street: 'turn' } });
-    if (boardLen === 5) this.bus.emit(gameId, { type: 'street.dealt', handId, payload: { street: 'river' } });
+    // Track action in log
+    if (handId) {
+      this.logAction(handId, {
+        player: playerId,
+        action: action.type,
+        amount: 'amount' in action ? action.amount : undefined,
+        ts: Date.now(),
+      });
+    }
+
+    this.emitEvent(gameId, { type: 'betting.action', handId, payload: { playerId, action } });
+
+    // Emit street dealt only when board length actually changed
+    const boardLenAfter = g.currentHand?.board.length ?? 0;
+    if (boardLenAfter > boardLenBefore) {
+      const street = boardLenAfter === 3 ? 'flop' : boardLenAfter === 4 ? 'turn' : 'river';
+      this.emitEvent(gameId, { type: 'street.dealt', handId, payload: { street } });
+    }
 
     const hand = g.currentHand;
     if (hand?.ended) {
-      this.bus.emit(gameId, {
+      this.emitEvent(gameId, {
         type: 'hand.ended',
         handId: hand.handId,
         payload: { winner: hand.winner, payout: hand.payout },
       });
 
+      // Persist completed hand to history
+      this.persistHand(g, hand);
+
       const bothHaveChips = g.stacks.hansu > 0 && g.stacks.clawd > 0;
       if (bothHaveChips) {
         g.currentHand = undefined;
         const next = startHand(g);
-        this.bus.emit(gameId, { type: 'hand.started', handId: next.handId, payload: { button: next.button } });
+        this.initActionLog(next.handId);
+        this.emitEvent(gameId, { type: 'hand.started', handId: next.handId, payload: { button: next.button } });
+        this.autoFairnessForAI(gameId);
       } else {
         g.status = 'finished';
-        this.bus.emit(gameId, { type: 'game.updated', payload: { status: 'finished' } });
+        this.emitEvent(gameId, { type: 'game.updated', payload: { status: 'finished' } });
       }
     }
 
+    this.persistGame(g);
     return this.getStateFor(gameId, playerId);
+  }
+
+  async getHistory(gameId: string): Promise<HandEntity[]> {
+    return this.handRepo.find({
+      where: { gameId },
+      order: { handNumber: 'ASC' },
+    });
+  }
+
+  // ── AI Fairness Automation ──
+
+  private autoFairnessForAI(gameId: string) {
+    const g = this.games.get(gameId);
+    if (!g?.currentHand || g.currentHand.deck) return; // already dealt
+
+    const hand = g.currentHand;
+    const aiPlayer: PlayerId = 'clawd';
+
+    // Auto-generate seed for AI
+    const seed = randomBytes(32).toString('hex');
+    const commitHash = sha256Hex(seed);
+
+    // Commit
+    setCommit(g, aiPlayer, commitHash);
+    this.emitEvent(gameId, {
+      type: 'fairness.commit',
+      handId: hand.handId,
+      payload: { playerId: aiPlayer, auto: true },
+    });
+
+    // Reveal immediately
+    const beforeDealt = !g.currentHand.deck;
+    setReveal(g, aiPlayer, seed);
+    this.emitEvent(gameId, {
+      type: 'fairness.reveal',
+      handId: hand.handId,
+      payload: { playerId: aiPlayer, auto: true },
+    });
+
+    const afterDealt = !!g.currentHand.deck;
+    if (beforeDealt && afterDealt) {
+      this.emitEvent(gameId, { type: 'game.updated', handId: hand.handId, payload: { dealt: true } });
+    }
+  }
+
+  // ── Action Log Helpers ──
+
+  private initActionLog(handId: string) {
+    this.actionLogs.set(handId, []);
+  }
+
+  private logAction(handId: string, entry: ActionLogEntry) {
+    const log = this.actionLogs.get(handId);
+    if (log) {
+      log.push(entry);
+    }
+  }
+
+  // ── Persistence Helpers ──
+
+  private persistGame(game: GameState) {
+    const hand = game.currentHand;
+    // Serialize hand state without the deck (security: don't persist undealt cards)
+    let handSnapshot: Record<string, unknown> | null = null;
+    if (hand) {
+      const { deck: _deck, ...safeHand } = hand;
+      handSnapshot = safeHand as unknown as Record<string, unknown>;
+    }
+
+    this.gameRepo
+      .save({
+        id: game.gameId,
+        status: game.status,
+        blinds: game.blinds,
+        stacks: game.stacks,
+        joined: game.joined,
+        handNo: game.handNo,
+        currentHandState: handSnapshot,
+      })
+      .catch((err) => {
+        console.error(`[persistGame] Failed to persist game ${game.gameId}:`, err);
+      });
+  }
+
+  private persistHand(game: GameState, hand: HandState) {
+    const actions = this.actionLogs.get(hand.handId) ?? [];
+    // Clean up action log from memory
+    this.actionLogs.delete(hand.handId);
+
+    this.handRepo
+      .save({
+        id: hand.handId,
+        gameId: game.gameId,
+        handNumber: game.handNo,
+        winner: hand.winner ?? null,
+        payout: hand.payout ?? null,
+        board: hand.board,
+        holecards: hand.hole as Record<string, [string, string]>,
+        actions,
+        fairness: hand.fairness as unknown as Record<string, unknown>,
+        finalStacks: { ...game.stacks },
+      })
+      .catch((err) => {
+        console.error(`[persistHand] Failed to persist hand ${hand.handId}:`, err);
+      });
+  }
+
+  private entityToGameState(entity: GameEntity): GameState {
+    const game: GameState = {
+      gameId: entity.id,
+      createdAt: entity.createdAt.toISOString(),
+      status: entity.status,
+      blinds: entity.blinds,
+      stacks: entity.stacks as Record<PlayerId, number>,
+      joined: entity.joined as Record<PlayerId, boolean>,
+      handNo: entity.handNo,
+    };
+
+    // Restore current hand state (without deck — fairness protocol will re-deal if needed)
+    if (entity.currentHandState) {
+      game.currentHand = entity.currentHandState as unknown as HandState;
+    }
+
+    return game;
   }
 }

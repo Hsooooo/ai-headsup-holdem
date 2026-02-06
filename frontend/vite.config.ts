@@ -7,15 +7,16 @@ export default defineConfig({
   server: {
     // Dev-only proxy. Production uses nginx: /api -> api:3000
     proxy: {
-      '/games': {
+      '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
       },
-      '/auth': {
+      '/socket.io': {
         target: 'http://localhost:3000',
         changeOrigin: true,
+        ws: true,
       },
-      // If there are other endpoints, add them here
     },
   },
 })

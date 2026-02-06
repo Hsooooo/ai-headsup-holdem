@@ -71,14 +71,13 @@ export const api = {
         return res.json();
     },
 
-    async join(gameId: string, playerId: PlayerId, token: string): Promise<GameStatePublic> {
+    async join(gameId: string, token: string): Promise<GameStatePublic> {
         const res = await fetch(`${API_BASE}/games/${gameId}/join`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({ playerId })
+            }
         });
         if (!res.ok) throw new Error('Join Failed');
         return res.json();
