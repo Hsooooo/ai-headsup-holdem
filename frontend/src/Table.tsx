@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { api } from './api';
-import type { GameStatePublic, PlayerId } from './api';
+import type { GameStatePublic, HandHistoryItem, PlayerId } from './api';
 import { Card } from './Card';
 import { generateSeed, sha256 } from './poker';
 import { connectGameSocket } from './socket';
@@ -15,11 +15,14 @@ interface TableProps {
 
 export const Table: React.FC<TableProps> = ({ gameId, playerId, token, onLeave }) => {
     const [state, setState] = useState<GameStatePublic | null>(null);
+    const [lastHand, setLastHand] = useState<HandHistoryItem | null>(null);
     const [fairnessError, setFairnessError] = useState<string>('');
 
     // Fairness state
     const currentHandIdRef = useRef<string | null>(null);
     const mySeedRef = useRef<string | null>(null);
+    const lastSeenHandNoRef = useRef<number | null>(null);
+    const lastEndedFetchedHandIdRef = useRef<string | null>(null);
 
     useEffect(() => {
         fetchState();
@@ -34,8 +37,31 @@ export const Table: React.FC<TableProps> = ({ gameId, playerId, token, onLeave }
             const s = await api.getState(gameId, token);
             setState(s);
             await checkFairness(s);
+            await refreshLastHandIfNeeded(s);
         } catch (e) {
             console.error(e);
+        }
+    };
+
+    const fetchLatestHistory = async () => {
+        const history = await api.getHistory(gameId, token);
+        if (history.length > 0) {
+            setLastHand(history[history.length - 1]);
+        }
+    };
+
+    const refreshLastHandIfNeeded = async (s: GameStatePublic) => {
+        const prevHandNo = lastSeenHandNoRef.current;
+        lastSeenHandNoRef.current = s.handNo;
+
+        if (prevHandNo !== null && prevHandNo !== s.handNo) {
+            await fetchLatestHistory();
+            return;
+        }
+
+        if (s.hand?.ended && s.hand.handId !== lastEndedFetchedHandIdRef.current) {
+            lastEndedFetchedHandIdRef.current = s.hand.handId;
+            await fetchLatestHistory();
         }
     };
 
@@ -209,6 +235,41 @@ export const Table: React.FC<TableProps> = ({ gameId, playerId, token, onLeave }
                 {hand?.fairness.commit[playerId] ? 'Committed ' : '... '}
                 {hand?.fairness.seed[playerId] ? 'Revealed' : ''}
             </div>
+
+            {lastHand ? (
+                <div style={{
+                    position: 'absolute',
+                    right: 10,
+                    bottom: 10,
+                    width: 340,
+                    color: 'white',
+                    background: '#111a',
+                    border: '1px solid #ffffff33',
+                    borderRadius: 10,
+                    padding: 10,
+                    fontSize: 12,
+                }}>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                        Last Hand #{lastHand.handNumber}
+                    </div>
+                    <div>
+                        Winner: {lastHand.winner ?? 'n/a'}
+                    </div>
+                    <div>
+                        Payout: {lastHand.payout ? JSON.stringify(lastHand.payout) : 'n/a'}
+                    </div>
+                    <div style={{ marginTop: 6 }}>
+                        Board: {lastHand.board.length > 0 ? lastHand.board.join(' ') : '(no board)'}
+                    </div>
+                    <div style={{ marginTop: 6 }}>
+                        Holecards:
+                        {' '}
+                        Hansu {lastHand.holecards?.hansu?.join(' ') ?? '-- --'}
+                        {' | '}
+                        Clawd {lastHand.holecards?.clawd?.join(' ') ?? '-- --'}
+                    </div>
+                </div>
+            ) : null}
         </div>
     );
 };

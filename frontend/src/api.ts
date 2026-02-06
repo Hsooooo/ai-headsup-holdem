@@ -52,6 +52,20 @@ export interface GameStatePublic {
     hole: [CardStr, CardStr] | null;
 }
 
+export interface HandHistoryItem {
+    id: string;
+    gameId: string;
+    handNumber: number;
+    winner: PlayerId | 'split' | null;
+    payout: Record<PlayerId, number> | null;
+    board: CardStr[];
+    holecards: Record<PlayerId, [CardStr, CardStr]>;
+    actions: Array<{ player: PlayerId; action: string; amount?: number; ts: number }>;
+    fairness: Record<string, unknown>;
+    finalStacks: Record<PlayerId, number>;
+    createdAt: string;
+}
+
 export interface CreateGameResponse {
     gameId: string;
     // ... other fields
@@ -127,6 +141,14 @@ export const api = {
             body: JSON.stringify({ action, amount })
         });
         if (!res.ok) throw new Error(`Action Failed: ${await res.text()}`);
+        return res.json();
+    },
+
+    async getHistory(gameId: string, token: string): Promise<HandHistoryItem[]> {
+        const res = await fetch(`${API_BASE}/games/${gameId}/history`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Get History Failed');
         return res.json();
     }
 };
